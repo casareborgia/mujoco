@@ -1,204 +1,80 @@
-<h1>
-  <a href="#"><img alt="MuJoCo" src="banner.png" width="100%"/></a>
-</h1>
+---
+library_name: stable-baselines3
+tags:
+- mujoco
+- gymnasium
+- ppo
+- reinforcement-learning
+- deep-reinforcement-learning
+- TwoStageBallMaze-v0
+model-index:
+- name: PPO-TwoStageBallMaze-v0
+  results:
+  - task:
+      type: reinforcement-learning
+      name: Reinforcement Learning
+    dataset:
+      name: TwoStageBallMaze-v0
+      type: TwoStageBallMaze-v0
+    metrics:
+    - type: mean_reward
+      value: 1118.0
+      name: Mean Official Score
+    - type: success_rate
+      value: 1.0
+      name: Goal Success Rate
+---
 
-<p>
-  <a href="https://github.com/google-deepmind/mujoco/actions/workflows/build.yml?query=branch%3Amain" alt="GitHub Actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/google-deepmind/mujoco/build.yml?branch=main">
-  </a>
-  <a href="https://mujoco.readthedocs.io/" alt="Documentation">
-    <img src="https://readthedocs.org/projects/mujoco/badge/?version=latest">
-  </a>
-  <a href="https://github.com/google-deepmind/mujoco/blob/main/LICENSE" alt="License">
-    <img src="https://img.shields.io/github/license/google-deepmind/mujoco">
-  </a>
-</p>
+# 🏆 TwoStageBallMaze-v0: Gymnasium MuJoCo 2단계 선택형 복잡 미로 강화학습
 
-**MuJoCo** stands for **Mu**lti-**Jo**int dynamics with **Co**ntact. It is a
-general purpose physics engine that aims to facilitate research and development
-in robotics, biomechanics, graphics and animation, machine learning, and other
-areas which demand fast and accurate simulation of articulated structures
-interacting with their environment.
+Farama [Gymnasium MuJoCo 환경 규격](https://gymnasium.farama.org/environments/mujoco/)(`MujocoEnv`, `EzPickle`)을 준수하여 제작된 **2단계 선택형 복잡 미로(Two-Stage Branching Maze)** 및 **점수 극대화(Score Maximization) PPO 에이전트**입니다.
 
-This repository is maintained by [Google DeepMind](https://www.deepmind.com/).
+## 1. 환경 및 미로 설계 (`TwoStageBallMaze-v0`)
 
-MuJoCo has a C API and is intended for researchers and developers. The runtime
-simulation module is tuned to maximize performance and operates on low-level
-data structures that are preallocated by the built-in XML compiler. The library
-includes interactive visualization with a native GUI, rendered in OpenGL. MuJoCo
-further exposes a large number of utility functions for computing
-physics-related quantities.
+- **환경 ID**: `TwoStageBallMaze-v0` (`run:TwoStageBallMazeEnv`)
+- **미로 구조 (2단계 선택형 복잡 미로)**:
+  1. **1단계 (`Stage 1: y ∈ [-2.0, 0.0]`)**: 하단 출발 구역 `(0.0, -1.65)` 정면 차단벽, 좌측 막다른 함정 포켓(`maze_s1_left_deadend`), 다중 지그재그 격벽으로 구성된 복잡 미로 구간입니다.
+  2. **2단계 (`Stage 2: y ∈ [0.0, +2.0]`, 선택에 따라 결과가 바뀜)**:
+     - 💀 **오답 함정 루트 (`(-1.30, 1.30)`)**: 잘못된 분기 선택 시 빠지는 좌측 상단 함정 홀로, 길을 찾지 못한 것으로 판정되어 **`-500점`** 페널티와 함께 에피소드가 종료됩니다.
+     - 🏆 **진정한 골인 루트 (`(1.30, 1.30)`)**: 수비 격벽과 탄성 범퍼를 우회하여 우측 상단 골인 홀컵에 들어가면 **`+1,000점`**을 획득합니다.
 
-We also provide [Python bindings] and a plug-in for the [Unity] game engine.
+## 2. 보상 체계 및 목표
 
-## Documentation
+| 이벤트 / 조건 | 점수 (보상) | 설명 |
+| :--- | :---: | :--- |
+| **골인지점 도달 시** | **`+1,000점`** | 2단계 우측 상단 진정한 골인 홀 `(1.30, 1.30)` 진입 |
+| **시행착오 시** | **`+10점` / 회** | 미로 내 분기 탐색 체크포인트(`trial_node_1~8`) 및 신규 구역 개척 (최대 12회 = `+120점`) |
+| **아무것도 하지 않을 시** | **`-1,000점`** | 일정 시간 동안 움직이지 않고 정지 시 즉시 페널티 종료 |
+| **길을 못 찾을 시** | **`-500점`** | 2단계 오답 함정 홀 진입 또는 제한 스텝(`450 steps`) 초과 |
+| **최종 목표** | **점수의 극대화** | 시행착오 보너스(`+120점`) + 골인(`+1,000점`) 결합 → **최고 `+1,120점` 달성** |
 
-MuJoCo's documentation can be found at [mujoco.readthedocs.io]. Upcoming
-features due for the next release can be found in the [changelog] in the
-"latest" branch.
+## 3. 학습 데이터 대시보드 및 주행 궤적 비교
 
-## Getting Started
+![Training Dashboard](./training_dashboard.png)
 
-There are two easy ways to get started with MuJoCo:
+## 4. 사용 방법 (Gymnasium & Stable-Baselines3)
 
-1. **Run `simulate` on your machine.**
-[This video](https://www.youtube.com/watch?v=P83tKA1iz2Y) shows a screen capture
-of `simulate`, MuJoCo's native interactive viewer. Follow the steps described in
-the [Getting Started] section of the documentation to get `simulate` running on
-your machine.
+```python
+import gymnasium as gym
+from stable_baselines3 import PPO
+import run  # TwoStageBallMaze-v0 자동 등록
 
-2. **Explore our online IPython notebooks.**
-If you are a Python user, you might want to start with our tutorial notebooks
-running on Google Colab:
+gym.register_envs(run)
+env = gym.make("TwoStageBallMaze-v0", render_mode="rgb_array", curriculum=False)
+model = PPO.load("ppo_two_stage_maze")
 
- - The **introductory** tutorial teaches MuJoCo basics:
-   [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/google-deepmind/mujoco/blob/main/python/tutorial.ipynb)
- - The **Model Editing** tutorial shows how to create and edit models procedurally:
-   [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/google-deepmind/mujoco/blob/main/python/mjspec.ipynb)
- - The **rollout** tutorial shows how to use the multithreaded `rollout` module:
-   [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/google-deepmind/mujoco/blob/main/python/rollout.ipynb)
- - The **LQR** tutorial synthesizes a linear-quadratic controller, balancing a
-   humanoid on one leg:
-   [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/google-deepmind/mujoco/blob/main/python/LQR.ipynb)
- - The **least-squares** tutorial explains how to use the Python-based nonlinear
-   least-squares solver:
-   [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/google-deepmind/mujoco/blob/main/python/least_squares.ipynb)
- - The **MJX** tutorial provides usage examples of
-   [MuJoCo XLA](https://mujoco.readthedocs.io/en/stable/mjx.html), a branch of MuJoCo written in JAX:
-   [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/google-deepmind/mujoco/blob/main/mjx/tutorial.ipynb)
- - The **differentiable physics** tutorial trains locomotion policies with
-   analytical gradients automatically derived from MuJoCo's physics step:
-   [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/google-deepmind/mujoco/blob/main/mjx/training_apg.ipynb)
+obs, info = env.reset(seed=42)
+done = False
+while not done:
+    action, _ = model.predict(obs, deterministic=True)
+    obs, reward, terminated, truncated, info = env.step(action)
+    done = terminated or truncated
 
-## Installation
+print("Final Official Score:", info["episode_score"], "Outcome:", info["outcome"])
+```
 
-### Prebuilt binaries
-
-Versioned releases are available as precompiled binaries from the GitHub
-[releases page], built for Linux (x86-64 and AArch64), Windows (x86-64 only),
-and macOS (universal). This is the recommended way to use the software.
-
-### Building from source
-
-Users who wish to build MuJoCo from source should consult the [build from
-source] section of the documentation. However, note that the commit at
-the tip of the `main` branch may be unstable.
-
-### Python (>= 3.11)
-
-The native Python bindings, which come pre-packaged with a copy of MuJoCo, can
-be installed from [PyPI] via:
+### 3D MuJoCo 실시간 비교 뷰어 실행
 
 ```bash
-pip install mujoco
+python run.py
 ```
-
-Note that Pre-built Linux wheels target `manylinux2014`, see
-[here](https://github.com/pypa/manylinux) for compatible distributions. For more
-information such as building the bindings from source, see the [Python bindings]
-section of the documentation.
-
-## Versioning
-
-We aim to release MuJoCo in the first week of each month. Our versioning
-standards changed to modified Semantic Versioning in 3.5.0,
-see [versioning](VERSIONING.md) for details.
-
-## Contributing
-
-We welcome community engagement: questions, requests for help, bug reports and
-feature requests. To read more about bug reports, feature requests and more
-ambitious contributions, please see our [contributors guide](CONTRIBUTING.md)
-and [style guide](STYLEGUIDE.md).
-
-## Asking Questions
-
-Questions and requests for help are welcome as a GitHub
-["Asking for Help" Discussion](https://github.com/google-deepmind/mujoco/discussions/categories/asking-for-help)
-and should focus on a specific problem or question.
-
-## Bug reports and feature requests
-
-GitHub [Issues](https://github.com/google-deepmind/mujoco/issues) are reserved
-for bug reports, feature requests and other development-related subjects.
-
-## Related software
-MuJoCo is the backbone for numerous environment packages. Below we list several
-bindings and converters.
-
-### Bindings
-
-These packages give users of various languages access to MuJoCo functionality:
-
-#### First-party bindings:
-
-- [Python bindings](https://mujoco.readthedocs.io/en/stable/python.html)
-  - [dm_control](https://github.com/google-deepmind/dm_control), Google
-    DeepMind's related environment stack, includes
-    [PyMJCF](https://github.com/google-deepmind/dm_control/blob/main/dm_control/mjcf/README.md),
-    a module for procedural manipulation of MuJoCo models.
-- [JavaScript bindings and WebAssembly support](/wasm/README.md) (inspired [stillonearth](https://github.com/stillonearth) and [zalo](https://github.com/zalo)'s community projects; [mjswan](https://github.com/ttktjmt/mjswan) extends these with real-time policy control, interactive force
-application, and more).
-- [C# bindings and Unity plug-in](https://mujoco.readthedocs.io/en/stable/unity.html)
-
-#### Third-party bindings:
-
-- **MATLAB Simulink**: [Simulink Blockset for MuJoCo Simulator](https://github.com/mathworks-robotics/mujoco-simulink-blockset)
-  by [Manoj Velmurugan](https://github.com/vmanoj1996).
-- **Swift**: [swift-mujoco](https://github.com/liuliu/swift-mujoco)
-- **Java**: [mujoco-java](https://github.com/CommonWealthRobotics/mujoco-java)
-- **Julia**: [MuJoCo.jl](https://github.com/JamieMair/MuJoCo.jl)
-- **Rust**: [MuJoCo-rs](https://github.com/davidhozic/mujoco-rs)
-
-### Converters
-
-- **OpenSim**: [MyoConverter](https://github.com/MyoHub/myoconverter) converts
-  OpenSim models to MJCF.
-- **SDFormat**: [gz-mujoco](https://github.com/gazebosim/gz-mujoco/) is a
-  two-way SDFormat <-> MJCF conversion tool.
-- **OBJ**: [obj2mjcf](https://github.com/kevinzakka/obj2mjcf)
-  a script for converting composite OBJ files into a loadable MJCF model.
-- **onshape**: [Onshape to Robot](https://github.com/rhoban/onshape-to-robot)
-  Converts [onshape](https://www.onshape.com/en/) CAD assemblies to MJCF.
-
-## Citation
-
-If you use MuJoCo for published research, please cite:
-
-```
-@inproceedings{todorov2012mujoco,
-  title={MuJoCo: A physics engine for model-based control},
-  author={Todorov, Emanuel and Erez, Tom and Tassa, Yuval},
-  booktitle={2012 IEEE/RSJ International Conference on Intelligent Robots and Systems},
-  pages={5026--5033},
-  year={2012},
-  organization={IEEE},
-  doi={10.1109/IROS.2012.6386109}
-}
-```
-
-## License and Disclaimer
-
-Copyright 2021 DeepMind Technologies Limited.
-
-Box collision code ([`engine_collision_box.c`](https://github.com/google-deepmind/mujoco/blob/main/src/engine/engine_collision_box.c))
-is Copyright 2016 Svetoslav Kolev.
-
-ReStructuredText documents, images, and videos in the `doc` directory are made
-available under the terms of the Creative Commons Attribution 4.0 (CC BY 4.0)
-license. You may obtain a copy of the License at
-https://creativecommons.org/licenses/by/4.0/legalcode.
-
-Source code is licensed under the Apache License, Version 2.0. You may obtain a
-copy of the License at https://www.apache.org/licenses/LICENSE-2.0.
-
-This is not an officially supported Google product.
-
-[build from source]: https://mujoco.readthedocs.io/en/latest/programming#building-from-source
-[Getting Started]: https://mujoco.readthedocs.io/en/latest/programming#getting-started
-[Unity]: https://unity.com/
-[releases page]: https://github.com/google-deepmind/mujoco/releases
-[mujoco.readthedocs.io]: https://mujoco.readthedocs.io
-[changelog]: https://mujoco.readthedocs.io/en/latest/changelog.html
-[Python bindings]: https://mujoco.readthedocs.io/en/stable/python.html#python-bindings
-[PyPI]: https://pypi.org/project/mujoco/

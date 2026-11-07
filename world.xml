@@ -1,0 +1,208 @@
+<mujoco model="two_stage_branching_maze_rl">
+  <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="Euler"/>
+
+  <!-- 4.4m x 4.4m 2단계 복합 미로 전체가 한눈에 들어오는 수직 탑다운 시점 -->
+  <statistic center="0 0 0.30" extent="3.35"/>
+
+  <visual>
+    <headlight diffuse="0.85 0.85 0.85" ambient="0.55 0.55 0.55" specular="0.40 0.40 0.40"/>
+    <rgba haze="0.10 0.14 0.22 1"/>
+    <global azimuth="-90" elevation="-84" fovy="45" offwidth="1280" offheight="720"/>
+    <map znear="0.05" zfar="30"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.14 0.24 0.38" rgb2="0.04 0.06 0.10" width="512" height="3072"/>
+
+    <!-- 경기장 바닥 체크 텍스처 -->
+    <texture type="2d" name="arena_tex" builtin="checker" mark="edge"
+      rgb1="0.16 0.22 0.30" rgb2="0.12 0.17 0.24" markrgb="0.24 0.32 0.44" width="512" height="512"/>
+    <material name="arena_mat" texture="arena_tex" texuniform="true" texrepeat="10 10" reflectance="0.04" specular="0.1"/>
+
+    <!-- 1단계 미로 벽(황동색) / 2단계 분기 미로 벽(청록색) / 외곽 유리벽 -->
+    <material name="glass_wall_mat" rgba="0.75 0.88 1.0 0.28" specular="0.8" shininess="0.8"/>
+    <material name="stage1_wall_mat" rgba="0.85 0.55 0.22 1" specular="0.4" shininess="0.4"/>
+    <material name="stage2_wall_mat" rgba="0.20 0.72 0.78 1" specular="0.5" shininess="0.5"/>
+    <material name="divider_wall_mat" rgba="0.90 0.82 0.30 1" specular="0.6" shininess="0.6"/>
+    <material name="trap_mat" rgba="0.92 0.18 0.32 1" specular="0.7" shininess="0.7"/>
+
+    <!-- 에이전트 공 텍스처 -->
+    <texture type="cube" name="ball_tex" builtin="checker" mark="cross"
+      rgb1="1.0 0.95 0.15" rgb2="0.95 0.25 0.05" markrgb="1.0 1.0 1.0" width="256" height="256"/>
+    <material name="ball_mat" texture="ball_tex" specular="0.8" shininess="0.7"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 -1.0 6.5" dir="0 0.15 -1" directional="true" castshadow="true"/>
+    <light pos="2.0 2.0 5.5" dir="-0.3 -0.3 -1" diffuse="0.45 0.45 0.45"/>
+
+    <geom name="base_ground" type="plane" pos="0 0 0" size="6 6 0.05" rgba="0.08 0.10 0.14 1"/>
+
+    <!-- ========================================================================= -->
+    <!-- 1. 수평 4.0m x 4.0m 2단계 선택형 미로 경기장 (상면 z=0.30m)               -->
+    <!--    - 진정한 골인 홀(True Goal, +1000점): 우측 상단 (1.30, 1.30)            -->
+    <!--    - 잘못된 선택 함정 구역(Wrong Choice Trap, -500점): 좌측 상단 (-1.30, 1.30)-->
+    <!-- ========================================================================= -->
+    <body name="two_stage_maze_arena" pos="0 0 0">
+      <!-- 우측 상단 골인 구멍(x,y ∈ [1.16, 1.44])을 제외한 4개 분할 바닥 슬래브 -->
+      <geom name="floor_left" type="box" pos="-0.42 0.0 0.15" size="1.58 2.00 0.15" material="arena_mat"
+        friction="0.45 0.003 0.001"/>
+      <geom name="floor_right" type="box" pos="1.72 0.0 0.15" size="0.28 2.00 0.15" material="arena_mat"
+        friction="0.45 0.003 0.001"/>
+      <geom name="floor_bottom" type="box" pos="1.30 -0.42 0.15" size="0.14 1.58 0.15" material="arena_mat"
+        friction="0.45 0.003 0.001"/>
+      <geom name="floor_top" type="box" pos="1.30 1.72 0.15" size="0.14 0.28 0.15" material="arena_mat"
+        friction="0.45 0.003 0.001"/>
+
+      <!-- 팔각형 골인 홀컵 베벨 -->
+      <geom name="hole_bevel_1" type="box" pos="1.16 1.16 0.15" size="0.05 0.05 0.15" euler="0 0 45" material="arena_mat"/>
+      <geom name="hole_bevel_2" type="box" pos="1.44 1.16 0.15" size="0.05 0.05 0.15" euler="0 0 45" material="arena_mat"/>
+      <geom name="hole_bevel_3" type="box" pos="1.16 1.44 0.15" size="0.05 0.05 0.15" euler="0 0 45" material="arena_mat"/>
+      <geom name="hole_bevel_4" type="box" pos="1.44 1.44 0.15" size="0.05 0.05 0.15" euler="0 0 45" material="arena_mat"/>
+
+      <!-- 골인 홀컵 내부 바닥 (z = 0.12m) -->
+      <geom name="hole_cup_bottom" type="box" pos="1.30 1.30 0.06" size="0.20 0.20 0.06" rgba="0.02 0.05 0.02 1"
+        solref="-8000 -120" friction="0.9 0.05 0.02"/>
+
+      <!-- 🏆 [결과 A: +1000점] 우측 상단 진정한 골인 지점 (황금색/초록색 발광 링) -->
+      <geom name="goal_ring_n" type="box" pos="1.30 1.46 0.305" size="0.16 0.025 0.005" rgba="0.15 1.0 0.35 0.95" contype="0" conaffinity="0"/>
+      <geom name="goal_ring_s" type="box" pos="1.30 1.14 0.305" size="0.16 0.025 0.005" rgba="0.15 1.0 0.35 0.95" contype="0" conaffinity="0"/>
+      <geom name="goal_ring_e" type="box" pos="1.46 1.30 0.305" size="0.025 0.16 0.005" rgba="0.15 1.0 0.35 0.95" contype="0" conaffinity="0"/>
+      <geom name="goal_ring_w" type="box" pos="1.14 1.30 0.305" size="0.025 0.16 0.005" rgba="0.15 1.0 0.35 0.95" contype="0" conaffinity="0"/>
+      <site name="hole_target_site" pos="1.30 1.30 0.302" size="0.14 0.002" type="cylinder" rgba="0.1 0.95 0.3 0.85"/>
+
+      <!-- 💀 [결과 B: -500점] 좌측 상단 2단계 오답 함정 홀 (선택 실패 시 빠지는 붉은 함정 구역) -->
+      <geom name="trap_ring_n" type="box" pos="-1.30 1.48 0.305" size="0.18 0.025 0.005" rgba="1.0 0.15 0.25 0.95" contype="0" conaffinity="0"/>
+      <geom name="trap_ring_s" type="box" pos="-1.30 1.12 0.305" size="0.18 0.025 0.005" rgba="1.0 0.15 0.25 0.95" contype="0" conaffinity="0"/>
+      <geom name="trap_ring_e" type="box" pos="-1.12 1.30 0.305" size="0.025 0.18 0.005" rgba="1.0 0.15 0.25 0.95" contype="0" conaffinity="0"/>
+      <geom name="trap_ring_w" type="box" pos="-1.48 1.30 0.305" size="0.025 0.18 0.005" rgba="1.0 0.15 0.25 0.95" contype="0" conaffinity="0"/>
+      <site name="trap_hole_site" pos="-1.30 1.30 0.303" size="0.16 0.003" type="cylinder" rgba="0.85 0.08 0.15 0.90"/>
+
+      <!-- 🏁 하단 중앙 출발 구역(Start Zone): (0.0, -1.65) -->
+      <site name="start_zone_site" pos="0.0 -1.65 0.303" size="0.28 0.22 0.003" type="box" rgba="0.25 0.60 1.0 0.45"/>
+
+      <!-- 🔄 시행착오(Trial & Error, +10점) 탐색 체크포인트 마커 (8개 분기/막다른 골목 지점) -->
+      <site name="trial_node_1" pos="-1.35 -1.35 0.303" size="0.14 0.003" type="cylinder" rgba="1.0 0.85 0.10 0.45"/>
+      <site name="trial_node_2" pos="1.35 -1.35 0.303" size="0.14 0.003" type="cylinder" rgba="1.0 0.85 0.10 0.45"/>
+      <site name="trial_node_3" pos="-0.85 -0.55 0.303" size="0.14 0.003" type="cylinder" rgba="1.0 0.85 0.10 0.45"/>
+      <site name="trial_node_4" pos="0.00 -0.45 0.303" size="0.14 0.003" type="cylinder" rgba="1.0 0.85 0.10 0.45"/>
+      <site name="trial_node_5" pos="1.15 -0.45 0.303" size="0.14 0.003" type="cylinder" rgba="1.0 0.85 0.10 0.45"/>
+      <site name="trial_node_6" pos="-0.35 0.35 0.303" size="0.14 0.003" type="cylinder" rgba="1.0 0.85 0.10 0.45"/>
+      <site name="trial_node_7" pos="0.45 0.45 0.303" size="0.14 0.003" type="cylinder" rgba="1.0 0.85 0.10 0.45"/>
+      <site name="trial_node_8" pos="1.45 0.45 0.303" size="0.14 0.003" type="cylinder" rgba="1.0 0.85 0.10 0.45"/>
+
+      <!-- ========================================================================= -->
+      <!-- 2. [1단계 미로 (Stage 1: y ∈ [-2.0, 0.0])] 복잡한 다중 통로 & 1차 선택 분기 -->
+      <!--    - 출발점(0.0, -1.65) 정면을 막아 좌/우 선택을 강제                     -->
+      <!--    - 좌측 루트는 1단계 막다른 포켓(Dead-end) 함정이 도사리고 있음          -->
+      <!--    - 우측/중앙 지그재그 루트를 정확히 선택해야 2단계 관문 통과 가능        -->
+      <!-- ========================================================================= -->
+      <!-- 출발지 정면 차단벽 (좌/우 1차 분기 선택 강제) -->
+      <geom name="maze_s1_front" type="box" pos="0.0 -1.10 0.40" size="0.68 0.05 0.10" material="stage1_wall_mat"/>
+      <!-- 좌측 하단 시행착오 유도 격벽 -->
+      <geom name="maze_s1_left_1" type="box" pos="-1.25 -0.95 0.40" size="0.05 0.45 0.10" material="stage1_wall_mat"/>
+      <!-- 좌측 중단 막다른 골목(Dead-end Pocket) 지붕벽: 좌측 외곽으로 올라가면 막힘! -->
+      <geom name="maze_s1_left_deadend" type="box" pos="-1.55 -0.25 0.40" size="0.45 0.05 0.10" material="stage1_wall_mat"/>
+      <!-- 중앙 시행착오 포켓 분리벽 -->
+      <geom name="maze_s1_center_v" type="box" pos="-0.45 -0.60 0.40" size="0.05 0.45 0.10" material="stage1_wall_mat"/>
+      <!-- 우측 하단/중단 지그재그 안내 격벽 (올바른 1단계 돌파 통로) -->
+      <geom name="maze_s1_right_1" type="box" pos="1.15 -1.10 0.40" size="0.05 0.45 0.10" material="stage1_wall_mat"/>
+      <geom name="maze_s1_right_2" type="box" pos="0.55 -0.50 0.40" size="0.48 0.05 0.10" material="stage1_wall_mat"/>
+
+      <!-- ========================================================================= -->
+      <!-- 3. [1단계 -> 2단계 경계 관문 (Stage Divider at y = 0.0)]                  -->
+      <!--    - 두 개의 게이트가 존재:                                                -->
+      <!--      Gate L (x ≈ -0.85): 2단계 진입 후 좌측 함정(-500점)으로 유인되기 쉬움 -->
+      <!--      Gate R (x ≈ +1.45): 2단계 우측 진정한 골인(+1000점) 방면 메인 관문    -->
+      <!-- ========================================================================= -->
+      <geom name="maze_div_left" type="box" pos="-1.60 0.00 0.41" size="0.40 0.06 0.11" material="divider_wall_mat"/>
+      <geom name="maze_div_mid" type="box" pos="0.20 0.00 0.41" size="0.78 0.06 0.11" material="divider_wall_mat"/>
+      <geom name="maze_div_right" type="box" pos="1.85 0.00 0.41" size="0.15 0.06 0.11" material="divider_wall_mat"/>
+
+      <!-- ========================================================================= -->
+      <!-- 4. [2단계 미로 (Stage 2: y ∈ [0.0, +2.0])] 선택에 따라 결과가 바뀌는 구역 -->
+      <!--    - 좌측 루트 선택 시 -> 붉은 함정 홀(-1.30, 1.30)에 빠져 -500점 종료!    -->
+      <!--    - 중앙/우측 S자 코리더 선택 시 -> 시행착오 노드(+10점)들을 쓸어담으며   -->
+      <!--      우측 상단 황금 골인 홀(+1.30, +1.30)에 도달해 +1000점 획득!           -->
+      <!-- ========================================================================= -->
+      <!-- 좌측 함정 방 유도 격벽 -->
+      <geom name="maze_s2_trap_guide" type="box" pos="-0.75 0.85 0.40" size="0.05 0.55 0.10" euler="0 0 18" material="stage2_wall_mat"/>
+      <!-- 중앙 2단계 분기 배플(Baffle) -->
+      <geom name="maze_s2_center_baffle" type="box" pos="0.05 0.75 0.40" size="0.48 0.05 0.10" euler="0 0 -22" material="stage2_wall_mat"/>
+      <!-- 우측 골인 지점 정면 수비 격벽 (단순 직진 차단 -> 우측 외곽 코리더/중앙 우회 선택 필수) -->
+      <geom name="maze_s2_goal_guard" type="box" pos="1.05 0.80 0.40" size="0.48 0.05 0.10" euler="0 0 25" material="stage2_wall_mat"/>
+      <!-- 상단 중앙 분리벽 (함정 방과 골인 방 분리) -->
+      <geom name="maze_s2_top_split" type="box" pos="0.15 1.50 0.40" size="0.05 0.50 0.10" material="stage2_wall_mat"/>
+
+      <!-- 탄성 범퍼 장애물 (정밀 속도/방향 제어 요구) -->
+      <geom name="bumper_1" type="cylinder" pos="-0.85 -1.45 0.40" size="0.11 0.10" material="stage2_wall_mat" solref="-12000 -10"/>
+      <geom name="bumper_2" type="cylinder" pos="0.65 -1.45 0.40" size="0.11 0.10" material="stage2_wall_mat" solref="-12000 -10"/>
+      <geom name="bumper_3" type="cylinder" pos="0.70 1.40 0.40" size="0.11 0.10" material="trap_mat" solref="-12000 -10"/>
+
+      <!-- 4면 반투명 외곽 펜스 -->
+      <geom name="wall_north" type="box" pos="0.0 2.06 0.44" size="2.12 0.06 0.14" material="glass_wall_mat"/>
+      <geom name="wall_south" type="box" pos="0.0 -2.06 0.44" size="2.12 0.06 0.14" material="glass_wall_mat"/>
+      <geom name="wall_east" type="box" pos="2.06 0.0 0.44" size="0.06 2.00 0.14" material="glass_wall_mat"/>
+      <geom name="wall_west" type="box" pos="-2.06 0.0 0.44" size="0.06 2.00 0.14" material="glass_wall_mat"/>
+    </body>
+
+    <!-- ========================================================================= -->
+    <!-- 5. 학습된 PPO 에이전트 공 (주황/노랑 줄무늬 + 노란색 하이라이트 링)         -->
+    <!-- ========================================================================= -->
+    <body name="rolling_ball" pos="0.0 -1.65 0.372">
+      <freejoint name="ball_freejoint"/>
+      <geom name="ball_geom" type="sphere" size="0.07" mass="0.35" material="ball_mat"
+        rgba="1.0 0.35 0.05 1" contype="2" conaffinity="1"
+        friction="0.45 0.003 0.001" solref="-12000 -20"/>
+      <geom name="ball_band_x" type="cylinder" size="0.072 0.012" euler="0 90 0"
+        rgba="1.0 0.95 0.1 1" group="1" contype="0" conaffinity="0" mass="0"/>
+      <geom name="ball_band_y" type="cylinder" size="0.072 0.012" euler="90 0 0"
+        rgba="1.0 1.0 1.0 1" group="1" contype="0" conaffinity="0" mass="0"/>
+      <site name="ball_center" pos="0 0 0" size="0.01"/>
+    </body>
+
+    <!-- 학습된 PPO 공 위치를 표시하는 노란색 하이라이트 링 + 핀 -->
+    <body name="ball_tracker_marker" mocap="true" pos="0.0 -1.65 0.52">
+      <geom name="tracker_ring" type="cylinder" size="0.12 0.006" rgba="1.0 0.95 0.0 0.85"
+        group="1" contype="0" conaffinity="0"/>
+      <geom name="tracker_pin" type="cylinder" pos="0 0 0.08" size="0.018 0.08" rgba="1.0 0.25 0.1 0.90"
+        group="1" contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- ========================================================================= -->
+    <!-- 6. 무작위/미학습 비교 공 (하늘색/파란색 구체 + 하늘색 하이라이트 링)        -->
+    <!-- ========================================================================= -->
+    <body name="random_ball" pos="0.0 -1.65 0.372">
+      <freejoint name="random_ball_freejoint"/>
+      <geom name="random_ball_geom" type="sphere" size="0.07" mass="0.35"
+        rgba="0.10 0.70 1.0 0.92" group="1" contype="4" conaffinity="1"
+        friction="0.45 0.003 0.001" solref="-12000 -20"/>
+      <geom name="random_band_x" type="cylinder" size="0.072 0.012" euler="0 90 0"
+        rgba="0.05 0.20 0.65 1" group="1" contype="0" conaffinity="0" mass="0"/>
+      <geom name="random_band_y" type="cylinder" size="0.072 0.012" euler="90 0 0"
+        rgba="1.0 1.0 1.0 1" group="1" contype="0" conaffinity="0" mass="0"/>
+      <site name="random_ball_center" pos="0 0 0" size="0.01"/>
+    </body>
+
+    <body name="random_tracker_marker" mocap="true" pos="0.0 -1.65 0.52">
+      <geom name="random_tracker_ring" type="cylinder" size="0.12 0.006" rgba="0.10 0.85 1.0 0.80"
+        group="1" contype="0" conaffinity="0"/>
+      <geom name="random_tracker_pin" type="cylinder" pos="0 0 0.08" size="0.018 0.08" rgba="0.10 0.55 1.0 0.90"
+        group="1" contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <general name="roll_fx" joint="ball_freejoint" gear="1 0 0 0 0 0" ctrllimited="true" ctrlrange="-3.5 3.5"/>
+    <general name="roll_fy" joint="ball_freejoint" gear="0 1 0 0 0 0" ctrllimited="true" ctrlrange="-3.5 3.5"/>
+  </actuator>
+
+  <sensor>
+    <framepos name="ball_pos" objtype="site" objname="ball_center"/>
+    <framelinvel name="ball_vel" objtype="site" objname="ball_center"/>
+    <framepos name="hole_pos" objtype="site" objname="hole_target_site"/>
+    <framepos name="random_ball_pos" objtype="site" objname="random_ball_center"/>
+    <framelinvel name="random_ball_vel" objtype="site" objname="random_ball_center"/>
+  </sensor>
+</mujoco>
